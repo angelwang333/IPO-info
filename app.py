@@ -7,15 +7,20 @@ import io
 # 設定網頁標題與寬度
 st.set_page_config(page_title="台灣 IPO 競拍追蹤", layout="wide")
 
-# === 核心函數：抓取與處理資料 ===
+# === 核心函數：抓取與處理資料 (已修復 SSL 問題) ===
 def get_twse_auction_data():
     url = "https://www.twse.com.tw/rwd/zh/announcement/auction"
     try:
-        # 模擬瀏覽器發送請求，避免被擋
+        # 忽略 SSL 警告
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
-        res = requests.get(url, headers=headers)
+        
+        # 關鍵修改：加上 verify=False
+        res = requests.get(url, headers=headers, verify=False)
         data = res.json()
         
         if 'data' not in data:
@@ -25,22 +30,19 @@ def get_twse_auction_data():
         processed_data = []
 
         for item in raw_list:
-            # 這裡依照證交所 JSON 的常見欄位名稱進行解析
-            # 注意：若證交所欄位名稱變更，這裡需要調整
-            # 我們先做一個字典對應
             row = {
                 "證券代號": item.get("code", ""),
                 "證券名稱": item.get("name", ""),
-                "競拍期間": item.get("dateRange", ""), # 格式如 112/11/01~112/11/03
+                "競拍期間": item.get("dateRange", ""),
                 "開標日期": item.get("openDate", ""),
-                "掛牌日期": item.get("t1", ""), # 通常 t1 是掛牌日
+                "掛牌日期": item.get("t1", ""),
                 "承銷股數": item.get("volume", ""),
                 "底價": item.get("price", ""),
-                "承銷價": item.get("price2", ""), # 實際承銷價
+                "承銷價": item.get("price2", ""),
                 "最低得標價": item.get("minPrice", ""),
                 "最高得標價": item.get("maxPrice", ""),
                 "得標加權平均價": item.get("averagePrice", ""),
-                "承銷商": item.get("secName", "") # 有時在 note 或其他欄位
+                "承銷商": item.get("secName", "")
             }
             
             # --- 處理日期格式 (民國轉西元) ---
@@ -53,11 +55,9 @@ def get_twse_auction_data():
                 except:
                     return None
 
-            # 解析關鍵日期
             row['date_open_obj'] = roc_to_date(row['開標日期'])
             row['date_list_obj'] = roc_to_date(row['掛牌日期'])
             
-            # 解析競拍結束日 (從字串 "113/11/01~113/11/03" 抓後面那段)
             try:
                 end_date_str = row['競拍期間'].split('~')[1]
                 row['date_auction_end_obj'] = roc_to_date(end_date_str)
