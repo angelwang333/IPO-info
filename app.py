@@ -7,7 +7,7 @@ import io
 # 設定網頁標題與寬度
 st.set_page_config(page_title="台灣 IPO 競拍追蹤", layout="wide")
 
-# === 核心函數：抓取與處理資料 (已修復 SSL 問題) ===
+# === 核心函數：抓取與處理資料 (最終修正版：修復 List 格式與 SSL 問題) ===
 def get_twse_auction_data():
     url = "https://www.twse.com.tw/rwd/zh/announcement/auction"
     try:
@@ -19,7 +19,7 @@ def get_twse_auction_data():
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
         
-        # 關鍵修改：加上 verify=False
+        # 加上 verify=False 避開憑證問題
         res = requests.get(url, headers=headers, verify=False)
         data = res.json()
         
@@ -29,20 +29,43 @@ def get_twse_auction_data():
         raw_list = data['data']
         processed_data = []
 
+        # 證交所資料欄位對應 (依據觀察 API 回傳順序)
+        # 0: 競拍期間 (e.g., 113/11/12~113/11/14)
+        # 1: 股票代號
+        # 2: 股票名稱
+        # 3: 產業
+        # 4: 承銷商
+        # 5: 承銷張數
+        # 6: 競拍張數
+        # 9: 底價
+        # 10: 承銷價
+        # 12: 最低得標價
+        # 13: 最高得標價
+        # 14: 得標加權平均價
+        # 17: 掛牌日期
+        # 18: 開標日期 (位置可能變動，通常在最後)
+
         for item in raw_list:
+            # 安全檢查：確保資料長度足夠，避免 IndexError
+            if len(item) < 18: 
+                continue
+
+            # 使用索引 (Index) 抓取資料，而非 .get()
             row = {
-                "證券代號": item.get("code", ""),
-                "證券名稱": item.get("name", ""),
-                "競拍期間": item.get("dateRange", ""),
-                "開標日期": item.get("openDate", ""),
-                "掛牌日期": item.get("t1", ""),
-                "承銷股數": item.get("volume", ""),
-                "底價": item.get("price", ""),
-                "承銷價": item.get("price2", ""),
-                "最低得標價": item.get("minPrice", ""),
-                "最高得標價": item.get("maxPrice", ""),
-                "得標加權平均價": item.get("averagePrice", ""),
-                "承銷商": item.get("secName", "")
+                "競拍期間": item[0],
+                "證券代號": item[1],
+                "證券名稱": item[2],
+                "所屬產業": item[3],
+                "承銷商": item[4],
+                "承銷張數": item[5],
+                "競拍張數": item[6],
+                "底價": item[9],
+                "承銷價": item[10],
+                "最低得標價": item[12],
+                "最高得標價": item[13],
+                "得標加權平均價": item[14],
+                "掛牌日期": item[17],
+                "開標日期": item[18] if len(item) > 18 else "" # 開標日通常在第 19 格 (index 18)
             }
             
             # --- 處理日期格式 (民國轉西元) ---
@@ -50,6 +73,8 @@ def get_twse_auction_data():
                 try:
                     if not roc_str: return None
                     parts = roc_str.split('/')
+                    # 簡單檢查格式是否正確
+                    if len(parts) != 3: return None
                     year = int(parts[0]) + 1911
                     return date(year, int(parts[1]), int(parts[2]))
                 except:
@@ -58,9 +83,14 @@ def get_twse_auction_data():
             row['date_open_obj'] = roc_to_date(row['開標日期'])
             row['date_list_obj'] = roc_to_date(row['掛牌日期'])
             
+            # 解析競拍結束日
             try:
-                end_date_str = row['競拍期間'].split('~')[1]
-                row['date_auction_end_obj'] = roc_to_date(end_date_str)
+                # 格式通常是 "113/11/01~113/11/03"
+                if '~' in row['競拍期間']:
+                    end_date_str = row['競拍期間'].split('~')[1]
+                    row['date_auction_end_obj'] = roc_to_date(end_date_str)
+                else:
+                    row['date_auction_end_obj'] = None
             except:
                 row['date_auction_end_obj'] = None
 
